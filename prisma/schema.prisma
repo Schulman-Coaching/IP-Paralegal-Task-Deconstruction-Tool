@@ -1,0 +1,482 @@
+// Prisma Schema for IP Paralegal Enterprise Platform
+// Multi-tenant architecture with organizations, teams, and role-based access
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+// ============================================
+// MULTI-TENANCY & ORGANIZATIONS
+// ============================================
+
+model Organization {
+  id          String   @id @default(cuid())
+  clerkOrgId  String   @unique // Clerk organization ID
+  name        String
+  slug        String   @unique
+  logo        String?
+  domain      String?  @unique // Custom domain for enterprise
+
+  // Subscription & Billing
+  stripeCustomerId     String?   @unique
+  stripeSubscriptionId String?   @unique
+  plan                 Plan      @default(FREE)
+  planExpiresAt        DateTime?
+
+  // Settings
+  settings    Json     @default("{}")
+
+  // Timestamps
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  members     OrganizationMember[]
+  teams       Team[]
+  cases       Case[]
+  forms       Form[]
+  recordings  Recording[]
+  apiKeys     ApiKey[]
+  webhooks    Webhook[]
+  auditLogs   AuditLog[]
+  invitations Invitation[]
+
+  @@index([clerkOrgId])
+  @@index([stripeCustomerId])
+}
+
+model OrganizationMember {
+  id             String       @id @default(cuid())
+  organizationId String
+  userId         String       // Clerk user ID
+  role           MemberRole   @default(MEMBER)
+
+  // Timestamps
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  // Relations
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  teamMembers    TeamMember[]
+
+  @@unique([organizationId, userId])
+  @@index([userId])
+}
+
+model Team {
+  id             String       @id @default(cuid())
+  organizationId String
+  name           String
+  description    String?
+
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  members        TeamMember[]
+  cases          Case[]
+
+  @@unique([organizationId, name])
+}
+
+model TeamMember {
+  id        String             @id @default(cuid())
+  teamId    String
+  memberId  String
+  role      TeamRole           @default(MEMBER)
+
+  createdAt DateTime           @default(now())
+
+  team      Team               @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  member    OrganizationMember @relation(fields: [memberId], references: [id], onDelete: Cascade)
+
+  @@unique([teamId, memberId])
+}
+
+model Invitation {
+  id             String       @id @default(cuid())
+  organizationId String
+  email          String
+  role           MemberRole   @default(MEMBER)
+  token          String       @unique @default(cuid())
+  expiresAt      DateTime
+  acceptedAt     DateTime?
+
+  createdAt      DateTime     @default(now())
+
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, email])
+  @@index([token])
+}
+
+// ============================================
+// CORE BUSINESS ENTITIES
+// ============================================
+
+model Case {
+  id             String       @id @default(cuid())
+  organizationId String
+  teamId         String?
+
+  // Case Details
+  caseNumber     String
+  title          String
+  description    String?
+  type           CaseType
+  status         CaseStatus   @default(OPEN)
+  priority       Priority     @default(MEDIUM)
+
+  // Client Info
+  clientName     String?
+  clientEmail    String?
+  clientPhone    String?
+
+  // Dates
+  filingDeadline DateTime?
+  dueDate        DateTime?
+  closedAt       DateTime?
+
+  // Metadata
+  tags           String[]     @default([])
+  metadata       Json         @default("{}")
+
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  createdBy      String       // Clerk user ID
+
+  // Relations
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  team           Team?        @relation(fields: [teamId], references: [id])
+  forms          Form[]
+  recordings     Recording[]
+  documents      Document[]
+  activities     Activity[]
+
+  @@unique([organizationId, caseNumber])
+  @@index([organizationId, status])
+  @@index([organizationId, type])
+  @@index([createdBy])
+}
+
+model Form {
+  id             String       @id @default(cuid())
+  organizationId String
+  caseId         String?
+
+  // Form Details
+  type           FormType
+  name           String
+  status         FormStatus   @default(DRAFT)
+  version        Int          @default(1)
+
+  // Form Data
+  data           Json         @default("{}")
+  extractedData  Json?        // AI-extracted entities
+
+  // Filing Info
+  filingNumber   String?
+  filedAt        DateTime?
+  filedBy        String?
+
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  createdBy      String
+
+  // Relations
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  case           Case?        @relation(fields: [caseId], references: [id])
+  recordings     Recording[]
+
+  @@index([organizationId, type])
+  @@index([caseId])
+}
+
+model Recording {
+  id             String          @id @default(cuid())
+  organizationId String
+  caseId         String?
+  formId         String?
+
+  // Recording Details
+  name           String
+  duration       Int?            // Duration in seconds
+  fileUrl        String?         // Cloud storage URL
+  fileSize       Int?            // Size in bytes
+  mimeType       String          @default("audio/webm")
+
+  // Transcription
+  status         RecordingStatus @default(PENDING)
+  transcript     String?         @db.Text
+  transcriptData Json?           // Detailed transcript with timestamps
+
+  // Analysis
+  analysisProvider String?       // 'openai' or 'claude'
+  analysisResult   Json?         // AI analysis results
+  extractedEntities Json?        // Extracted form fields
+
+  // Processing
+  processedAt    DateTime?
+  error          String?
+
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+  createdBy      String
+
+  // Relations
+  organization   Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  case           Case?           @relation(fields: [caseId], references: [id])
+  form           Form?           @relation(fields: [formId], references: [id])
+
+  @@index([organizationId])
+  @@index([caseId])
+  @@index([status])
+}
+
+model Document {
+  id             String       @id @default(cuid())
+  caseId         String
+
+  name           String
+  type           String       // MIME type
+  fileUrl        String
+  fileSize       Int
+
+  createdAt      DateTime     @default(now())
+  createdBy      String
+
+  case           Case         @relation(fields: [caseId], references: [id], onDelete: Cascade)
+
+  @@index([caseId])
+}
+
+// ============================================
+// API & INTEGRATIONS
+// ============================================
+
+model ApiKey {
+  id             String       @id @default(cuid())
+  organizationId String
+
+  name           String
+  key            String       @unique // Hashed API key
+  keyPrefix      String       // First 8 chars for identification
+
+  // Permissions
+  scopes         String[]     @default([])
+
+  // Rate Limiting
+  rateLimit      Int          @default(1000) // Requests per hour
+
+  // Usage
+  lastUsedAt     DateTime?
+  usageCount     Int          @default(0)
+
+  // Status
+  isActive       Boolean      @default(true)
+  expiresAt      DateTime?
+
+  createdAt      DateTime     @default(now())
+  createdBy      String
+
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([key])
+  @@index([organizationId])
+}
+
+model Webhook {
+  id             String       @id @default(cuid())
+  organizationId String
+
+  url            String
+  events         String[]     // Events to trigger webhook
+  secret         String       // HMAC signing secret
+
+  // Status
+  isActive       Boolean      @default(true)
+
+  // Delivery tracking
+  lastDeliveryAt DateTime?
+  failureCount   Int          @default(0)
+
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  deliveries     WebhookDelivery[]
+
+  @@index([organizationId])
+}
+
+model WebhookDelivery {
+  id          String   @id @default(cuid())
+  webhookId   String
+
+  event       String
+  payload     Json
+
+  // Response
+  statusCode  Int?
+  response    String?  @db.Text
+
+  // Timing
+  duration    Int?     // Response time in ms
+  deliveredAt DateTime @default(now())
+
+  // Status
+  success     Boolean  @default(false)
+  error       String?
+
+  webhook     Webhook  @relation(fields: [webhookId], references: [id], onDelete: Cascade)
+
+  @@index([webhookId])
+  @@index([deliveredAt])
+}
+
+// ============================================
+// AUDIT & COMPLIANCE
+// ============================================
+
+model AuditLog {
+  id             String       @id @default(cuid())
+  organizationId String
+
+  // Actor
+  userId         String
+  userEmail      String?
+  ipAddress      String?
+  userAgent      String?
+
+  // Action
+  action         String       // e.g., 'case.created', 'form.submitted'
+  entityType     String       // e.g., 'case', 'form', 'recording'
+  entityId       String?
+
+  // Details
+  description    String?
+  oldValue       Json?
+  newValue       Json?
+  metadata       Json         @default("{}")
+
+  createdAt      DateTime     @default(now())
+
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, createdAt])
+  @@index([userId])
+  @@index([entityType, entityId])
+  @@index([action])
+}
+
+model Activity {
+  id        String   @id @default(cuid())
+  caseId    String
+
+  type      String   // 'comment', 'status_change', 'file_upload', etc.
+  content   String?
+  metadata  Json     @default("{}")
+
+  createdAt DateTime @default(now())
+  createdBy String
+
+  case      Case     @relation(fields: [caseId], references: [id], onDelete: Cascade)
+
+  @@index([caseId, createdAt])
+}
+
+// ============================================
+// ENUMS
+// ============================================
+
+enum Plan {
+  FREE
+  STARTER
+  PROFESSIONAL
+  ENTERPRISE
+}
+
+enum MemberRole {
+  OWNER
+  ADMIN
+  MEMBER
+  VIEWER
+}
+
+enum TeamRole {
+  LEAD
+  MEMBER
+}
+
+enum CaseType {
+  PATENT_PROVISIONAL
+  PATENT_NONPROVISIONAL
+  PATENT_PCT
+  TRADEMARK_FEDERAL
+  TRADEMARK_STATE
+  TRADEMARK_INTERNATIONAL
+  COPYRIGHT_REGISTRATION
+  COPYRIGHT_DMCA
+  TRADE_SECRET
+  LICENSING
+  LITIGATION
+  OTHER
+}
+
+enum CaseStatus {
+  OPEN
+  IN_PROGRESS
+  PENDING_CLIENT
+  PENDING_FILING
+  FILED
+  UNDER_REVIEW
+  APPROVED
+  REJECTED
+  CLOSED
+  ARCHIVED
+}
+
+enum Priority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+enum FormType {
+  PATENT_PROVISIONAL
+  PATENT_NONPROVISIONAL
+  PATENT_CLAIMS
+  TRADEMARK_TEAS_PLUS
+  TRADEMARK_TEAS_STANDARD
+  TRADEMARK_INTENT_TO_USE
+  COPYRIGHT_STANDARD
+  COPYRIGHT_GROUP
+  NDA
+  ASSIGNMENT
+  LICENSE
+  CUSTOM
+}
+
+enum FormStatus {
+  DRAFT
+  IN_REVIEW
+  APPROVED
+  SUBMITTED
+  FILED
+  REJECTED
+}
+
+enum RecordingStatus {
+  PENDING
+  PROCESSING
+  TRANSCRIBED
+  ANALYZED
+  FAILED
+}
