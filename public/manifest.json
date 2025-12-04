@@ -1,0 +1,19 @@
+{
+  "name": "IP Paralegal Task Deconstructor",
+  "short_name": "IP Paralegal",
+  "description": "Audio recording, transcription, analysis, and form population for intellectual property tasks",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f5f9fc",
+  "theme_color": "#3498db",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ],
+  "categories": ["productivity", "business", "utilities"]
+}
