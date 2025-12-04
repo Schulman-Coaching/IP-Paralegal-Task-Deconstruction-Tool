@@ -1,0 +1,23 @@
+{
+  "name": "ip-paralegal-task-deconstruction-tool",
+  "version": "1.0.0",
+  "description": "IP Paralegal Task Deconstructor with audio recording, transcription, and form population",
+  "main": "api/index.js",
+  "scripts": {
+    "dev": "node api/index.js",
+    "start": "node api/index.js",
+    "build": "echo 'No build step required'"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "multer": "^1.4.5-lts.1",
+    "cors": "^2.8.5",
+    "dotenv": "^16.3.1",
+    "openai": "^4.20.0",
+    "@anthropic-ai/sdk": "^0.10.0",
+    "form-data": "^4.0.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
